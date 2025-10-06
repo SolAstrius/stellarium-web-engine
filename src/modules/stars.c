@@ -201,6 +201,58 @@ static void star_get_astrom(const star_t *s, const observer_t *obs,
     vec3_normalize(v, v);
 }
 
+/*
+ * Function: star_get_observer_vmag
+ * Calculate apparent magnitude as seen from observer's position.
+ *
+ * Applies inverse square law to adjust catalog magnitude based on
+ * observer's distance from the star versus Earth's distance.
+ *
+ * Parameters:
+ *   s   - The star
+ *   obs - The observer
+ *
+ * Returns:
+ *   Apparent magnitude from observer's position
+ */
+static double star_get_observer_vmag(const star_t *s, const observer_t *obs)
+{
+    double vmag_catalog = s->vmag;
+
+    // For stars without parallax (infinite distance), magnitude doesn't change
+    if (isnan(s->distance) || s->distance <= 0) {
+        return vmag_catalog;
+    }
+
+    // Star's current barycentric position (with proper motion applied)
+    double star_pos_bary[3];
+    double dt = obs->tt - ERFA_DJM00;
+    vec3_addk(s->pvo[0], s->pvo[1], dt, star_pos_bary);
+
+    // Distance from Earth to star (barycentric)
+    // The catalog magnitude was measured from Earth's barycentric position
+    double earth_to_star[3];
+    vec3_sub(star_pos_bary, obs->earth_pvb[0], earth_to_star);
+    double dist_earth = vec3_norm(earth_to_star);
+
+    // Distance from observer to star (barycentric)
+    double observer_to_star[3];
+    vec3_sub(star_pos_bary, obs->obs_pvb[0], observer_to_star);
+    double dist_observer = vec3_norm(observer_to_star);
+
+    // Avoid division by zero or very close approach
+    if (dist_observer < 1e-10) {
+        // Observer is essentially AT the star - infinitely bright
+        return -99.0;
+    }
+
+    // Apply inverse square law: m_obs = m_earth + 5*log10(d_earth/d_obs)
+    // Brighter when closer (negative offset), dimmer when farther (positive offset)
+    double vmag_observer = vmag_catalog + 5.0 * log10(dist_earth / dist_observer);
+
+    return vmag_observer;
+}
+
 // Return position and velocity in ICRF with origin on observer (AU).
 static int star_get_pvo(const obj_t *obj, const observer_t *obs,
                         double pvo[2][4])
@@ -222,7 +274,8 @@ static int star_get_info(const obj_t *obj, const observer_t *obs, int info,
         star_get_pvo(obj, obs, out);
         return 0;
     case INFO_VMAG:
-        *(double*)out = star->vmag;
+        // Return observer-adjusted magnitude (accounts for distance changes)
+        *(double*)out = star_get_observer_vmag(star, obs);
         return 0;
     case INFO_DISTANCE:
         *(double*)out = star->distance;
@@ -387,6 +440,7 @@ static int star_render(obj_t *obj, const painter_t *painter_)
     const star_t *star = (const star_t*)obj;
     double pvo[2][4], p[2], size, luminance;
     double color[3];
+    double vmag_observer;
     painter_t painter = *painter_;
     point_t point;
 
@@ -394,7 +448,9 @@ static int star_render(obj_t *obj, const painter_t *painter_)
     if (!painter_project(painter_, FRAME_ICRF, pvo[0], true, true, p))
         return 0;
 
-    if (!core_get_point_for_mag(star->vmag, &size, &luminance))
+    // Use observer-adjusted magnitude
+    vmag_observer = star_get_observer_vmag(star, painter.obs);
+    if (!core_get_point_for_mag(vmag_observer, &size, &luminance))
         return 0;
     bv_to_rgb(isnan(star->bv) ? 0 : star->bv, color);
 
@@ -680,20 +736,30 @@ static int render_visitor(stars_t *stars, survey_t *survey,
     point_t *points = malloc(tile->nb * sizeof(*points));
     for (i = 0; i < tile->nb; i++) {
         s = &tile->sources[i];
-        if (s->vmag > limit_mag) break;
+
+        // Get observer-adjusted magnitude (changes with observer distance)
+        double vmag_observer = star_get_observer_vmag(s, painter.obs);
+
+        // Early exit if star is too faint from observer's position
+        if (vmag_observer > limit_mag) {
+            // Note: Can't break here because next star might be closer to observer
+            // and thus brighter, even if catalog mag is fainter
+            continue;
+        }
 
         star_get_astrom(s, painter.obs, v);
         if (!painter_project(&painter, FRAME_ASTROM, v, true, true, p_win))
             continue;
 
-        (*illuminance) += s->illuminance;
+        // Recalculate illuminance based on observer magnitude
+        double illuminance_observer = core_mag_to_illuminance(vmag_observer);
+        (*illuminance) += illuminance_observer;
 
-        // No need to recompute the point size and luminance if the last
-        // star had the same vmag (often the case since we sort by vmag).
-        if (s->vmag != vmag) {
-            vmag = s->vmag;
-            core_get_point_for_mag(vmag, &size, &luminance);
-        }
+        // Recompute the point size and luminance for observer magnitude
+        // (Cannot cache because magnitude changes per observer position)
+        vmag = vmag_observer;
+        core_get_point_for_mag(vmag, &size, &luminance);
+
         if (size == 0.0 || luminance == 0.0)
             continue;
 

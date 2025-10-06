@@ -578,7 +578,7 @@ void observer_observe_from_object_ptr(observer_t *obs, obj_t *target, double dur
         // Need actual distance to position observer
         double distance;
         ret = obj_get_info(target, obs, INFO_DISTANCE, &distance);
-        if (ret != 0 || distance <= 0 || isnan(distance) || isinf(distance)) {
+        if (ret != 0 || distance <= 0 || isnan(distance)) {
             LOG_E("observeFromObject: cannot observe from object at infinity without valid distance (ret=%d, dist=%.2f)",
                   ret, distance);
             return;
@@ -615,7 +615,7 @@ void observer_observe_from_object_ptr(observer_t *obs, obj_t *target, double dur
 
     // Validate resulting position
     double pos_magnitude = vec3_norm(pvo[0]);
-    if (isnan(pos_magnitude) || isinf(pos_magnitude)) {
+    if (isnan(pos_magnitude)) {
         LOG_E("observeFromObject: invalid position after barycentric conversion (magnitude=%f)", pos_magnitude);
         return;
     }
