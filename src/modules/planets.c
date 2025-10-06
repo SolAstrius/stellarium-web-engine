@@ -516,13 +516,18 @@ static double sun_get_vmag(const planet_t *sun, const observer_t *obs)
 static double moon_get_vmag(const planet_t *moon, const observer_t *obs)
 {
     double el, dist;
-    double pvh[2][3], pvo[2][3];
+    double pvh[2][3], pvo[2][3], obs_to_moon[3];
 
     // This is based on the algo of pyephem.
     // XXX: move into 'algos'.
     planet_get_pvh(moon, obs, pvh);
     planet_get_pvo(moon, obs, pvo);
-    dist = vec3_norm(pvo[0]);
+
+    // Calculate actual distance from observer to moon
+    eraPvppv(pvh, obs->sun_pvb, obs_to_moon);
+    eraPvmpv(obs_to_moon, obs->obs_pvb, obs_to_moon);
+    dist = vec3_norm(obs_to_moon);
+
     el = vec3_sep(pvo[0], obs->sun_pvo[0]); // Elongation.
     return -12.7 +
         2.5 * (log10(M_PI) - log10(M_PI / 2.0 * (1.0 + 1.e-6 - cos(el)))) +
@@ -556,12 +561,12 @@ static double rings_vmag(const planet_t *planet, const observer_t *obs)
 static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
 {
     const double *vis;  // Visual element of planet.
-    double rho; // Distance to Earth (AU).
-    double rp;  // Distance to Sun (AU).
+    double rho; // Distance to Sun (AU).
+    double rp;  // Distance to observer (AU).
     double i;   // Phase angle.
     double mag;
     int n;
-    double pvh[2][3], pvo[2][3];
+    double pvh[2][3], pvo[2][3], obs_to_planet[3];
 
     switch (planet->id) {
     case SUN:
@@ -584,8 +589,13 @@ static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
         i = vec3_sep(pvh[0], pvo[0]);
         // Compute visual magnitude.
         i *= DR2D / 100;
-        rho = vec3_norm(pvh[0]);
-        rp = vec3_norm(pvo[0]);
+        rho = vec3_norm(pvh[0]); // Distance from Sun to planet
+
+        // Calculate actual distance from observer to planet
+        eraPvppv(pvh, obs->sun_pvb, obs_to_planet);
+        eraPvmpv(obs_to_planet, obs->obs_pvb, obs_to_planet);
+        rp = vec3_norm(obs_to_planet);
+
         vis = VIS_ELEMENTS[n];
         return vis[1] + 5 * log10(rho * rp) +
                i * (vis[2] + i * (vis[3] + i * vis[4])) +
@@ -595,8 +605,13 @@ static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
         // http://www.physics.sfasu.edu/astro/asteroids/sizemagnitude.html
         planet_get_pvh(planet, obs, pvh);
         planet_get_pvo(planet, obs, pvo);
-        rho = vec3_norm(pvh[0]);
-        rp = vec3_norm(pvo[0]);
+        rho = vec3_norm(pvh[0]); // Distance from Sun to planet
+
+        // Calculate actual distance from observer to planet
+        eraPvppv(pvh, obs->sun_pvb, obs_to_planet);
+        eraPvmpv(obs_to_planet, obs->obs_pvb, obs_to_planet);
+        rp = vec3_norm(obs_to_planet);
+
         assert(planet->albedo);
         mag = -1.0 / 0.2 * log10(sqrt(planet->albedo) *
                 2.0 * planet->radius_m / 1000.0 / 1329.0);
@@ -645,6 +660,7 @@ static int planet_get_info(const obj_t *obj, const observer_t *obs, int info,
 {
     const planet_t *planet = (const planet_t*)obj;
     double pvo[2][3];
+    double pvh[2][3], obs_to_planet[3];
     double mat[4][4];
 
     switch (info) {
@@ -670,6 +686,18 @@ static int planet_get_info(const obj_t *obj, const observer_t *obs, int info,
         return 0;
     case INFO_PHYSICAL_RADIUS:
         *(double*)out = planet->radius_m * DM2AU;
+        return 0;
+    case INFO_DISTANCE:
+        // Earth-centric distance (for compatibility)
+        planet_get_pvo(planet, obs, pvo);
+        *(double*)out = vec3_norm(pvo[0]);
+        return 0;
+    case INFO_OBSERVER_DISTANCE:
+        // Actual distance from observer to planet
+        planet_get_pvh(planet, obs, pvh);
+        eraPvppv(pvh, obs->sun_pvb, obs_to_planet);
+        eraPvmpv(obs_to_planet, obs->obs_pvb, obs_to_planet);
+        *(double*)out = vec3_norm(obs_to_planet);
         return 0;
     case INFO_MAT:
         planet_get_mat(planet, obs, (void*)out);
