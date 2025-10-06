@@ -11,12 +11,14 @@
 
 #ifdef __EMSCRIPTEN__
 
+#include <emscripten/fetch.h>
+
 #define MAX_NB  16 // Max number of concurrent requests.
 
 struct request
 {
     char        *url;
-    int         handle;
+    emscripten_fetch_t *fetch;
     int         status_code;
     bool        done;
     void        *data;
@@ -55,8 +57,8 @@ int request_is_finished(const request_t *req)
 void request_delete(request_t *req)
 {
     if (!req) return;
-    if (req->handle) {
-        emscripten_async_wget2_abort(req->handle - 1);
+    if (req->fetch) {
+        emscripten_fetch_close(req->fetch);
         g.nb--;
     }
     free(req->url);
@@ -87,55 +89,55 @@ static bool could_be_str(const request_t *req)
            !url_has_extension(req->url, ".eph");
 }
 
-static void onload(unsigned int _, void *arg, void *data, unsigned int size)
+static void downloadSucceeded(emscripten_fetch_t *fetch)
 {
-    char *tmp;
-    request_t *req = arg;
-    req->handle = 0;
-    req->status_code = 200; // XXX: get proper code.
+    request_t *req = (request_t*)fetch->userData;
 
-    // Even is the content type is not text, we still add a zero padding
-    // if we suspect the data is going to be interpreted as text.
-    if (could_be_str(req) && ((char*)data)[size] != 0) {
-        tmp = data;
-        data = calloc(1, size + 1);
-        memcpy(data, tmp, size);
-        free(tmp);
+    req->status_code = fetch->status;
+    req->size = fetch->numBytes;
+
+    // Copy the data from fetch buffer
+    req->data = malloc(req->size + 1);
+    memcpy(req->data, fetch->data, req->size);
+
+    // Add null termination for text files
+    if (could_be_str(req)) {
+        ((char*)req->data)[req->size] = '\0';
     }
 
-    req->data = data;
-    req->size = size;
     req->done = true;
+    req->fetch = NULL;
+    emscripten_fetch_close(fetch);
     g.nb--;
 }
 
-static void onerror(unsigned int _, void *arg, int err, const char *msg)
+static void downloadFailed(emscripten_fetch_t *fetch)
 {
-    request_t *req = arg;
-    // LOG_D("onerror %s %d %s", req->url, err, msg);
-    req->handle = 0;
-    // Use a default error code if we didn't get one...
-    req->status_code = err ?: 499;
-    req->done = true;
-    g.nb--;
-}
+    request_t *req = (request_t*)fetch->userData;
 
-static void onprogress(unsigned int _, void *arg, int nb_bytes, int size)
-{
+    req->status_code = fetch->status ?: 499;
+    req->done = true;
+    req->fetch = NULL;
+    emscripten_fetch_close(fetch);
+    g.nb--;
 }
 
 const void *request_get_data(request_t *req, int *size, int *status_code)
 {
-    int handle;
-    if (!req->done && !req->handle && g.nb < MAX_NB) {
-        handle = emscripten_async_wget2_data(
-                req->url, "GET", NULL, req, false,
-                onload, onerror, onprogress);
-        req->handle = handle + 1; // So that we cannot get 0.
+    if (!req->done && !req->fetch && g.nb < MAX_NB) {
+        emscripten_fetch_attr_t attr;
+        emscripten_fetch_attr_init(&attr);
+        strcpy(attr.requestMethod, "GET");
+        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+        attr.onsuccess = downloadSucceeded;
+        attr.onerror = downloadFailed;
+        attr.userData = req;
+
+        req->fetch = emscripten_fetch(&attr, req->url);
         g.nb++;
     }
     if (size) *size = req->size;
-    if (status_code) *status_code= req->status_code;
+    if (status_code) *status_code = req->status_code;
     return req->data;
 }
 

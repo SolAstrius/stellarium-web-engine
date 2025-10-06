@@ -109,11 +109,20 @@ int eph_load(const void *data, int data_size, void *user,
 
     assert(data);
     CHECK(data_size >= 4);
-    CHECK(strncmp(data, "EPHE", 4) == 0);
+    if (strncmp(data, "EPHE", 4) != 0) {
+        LOG_E("Invalid EPH file header: got '%c%c%c%c' (0x%02x %02x %02x %02x), expected 'EPHE'",
+              ((char*)data)[0], ((char*)data)[1], ((char*)data)[2], ((char*)data)[3],
+              ((unsigned char*)data)[0], ((unsigned char*)data)[1],
+              ((unsigned char*)data)[2], ((unsigned char*)data)[3]);
+        return -1;
+    }
     memcpy(&version, data + 4, 4);
     data += 8; data_size -= 8;
 
-    CHECK(version == FILE_VERSION);
+    if (version != FILE_VERSION) {
+        LOG_E("EPH file version mismatch: got %d, expected %d", version, FILE_VERSION);
+        return -1;
+    }
     while (data_size) {
         CHECK(data_size >= 8);
         memcpy(type, data, 4);

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(md5sum:*)",
+      "Bash(scons:*)",
+      "Bash(find:*)",
+      "Bash(cp:*)",
+      "Bash(make clean:*)",
+      "Bash(make:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

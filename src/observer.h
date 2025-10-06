@@ -89,6 +89,17 @@ struct observer
     double obs_pvb[2][3];
     double obs_pvg[2][3];
 
+    // Barycentric mode - when enabled, obs_pvb is set directly from barycentric_pv
+    bool barycentric_mode;
+    double barycentric_pv[2][3];  // User-set barycentric position/velocity
+
+    // Animation state for observeFromObject
+    bool animating;
+    double anim_start_clock;     // Animation start time (core->clock, real-world)
+    double anim_duration;        // Animation duration in seconds (real-world)
+    double anim_start_pv[2][3];  // Starting barycentric position/velocity
+    double anim_target_pv[2][3]; // Target barycentric position/velocity
+
     // Frame rotation matrices.
     // h: Horizontal (Alt/Az, left handed, X->N, Y->E, Z->up).
     // o: Observed: horizontal with refraction (Alt/Az, left handed).

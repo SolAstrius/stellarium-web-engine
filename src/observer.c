@@ -146,6 +146,12 @@ static void observer_update_fast(observer_t *obs)
 {
     double dut1, theta, pvg[2][3];
 
+    // Debug: log if we're animating
+    if (obs->animating) {
+        LOG_E("observer_update_fast: ANIMATING! clock=%.2f, start=%.2f, duration=%.2f",
+              core->clock, obs->anim_start_clock, obs->anim_duration);
+    }
+
     // Compute UT1 and UTC time.
     if (!obs->space && obs->last_update == obs->tt) goto end;
 
@@ -177,8 +183,45 @@ static void observer_update_fast(observer_t *obs)
                 &obs->astrom);
     }
 
+    // Update animation if active (uses core->clock for real-world time)
+    if (obs->animating) {
+        double t = (core->clock - obs->anim_start_clock) / obs->anim_duration;
+        if (t >= 1.0) {
+            // Animation complete
+            eraCpv(obs->anim_target_pv, obs->barycentric_pv);
+            obs->animating = false;
+            LOG_E("Animation complete at clock=%.2f, final pos=[%.6f, %.6f, %.6f]",
+                  core->clock, obs->barycentric_pv[0][0], obs->barycentric_pv[0][1],
+                  obs->barycentric_pv[0][2]);
+        } else {
+            // Smooth interpolation (ease-in-out cubic)
+            t = t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+            // Linear interpolation of position and velocity
+            vec3_mix(obs->anim_start_pv[0], obs->anim_target_pv[0], t, obs->barycentric_pv[0]);
+            vec3_mix(obs->anim_start_pv[1], obs->anim_target_pv[1], t, obs->barycentric_pv[1]);
+
+            // Log progress occasionally
+            static double last_log_time = 0;
+            if (core->clock - last_log_time > 1.0) {
+                LOG_E("Animation progress: t=%.2f, clock=%.2f, pos=[%.6f, %.6f, %.6f]",
+                      t, core->clock, obs->barycentric_pv[0][0],
+                      obs->barycentric_pv[0][1], obs->barycentric_pv[0][2]);
+                last_log_time = core->clock;
+            }
+        }
+        obs->barycentric_mode = true;
+    }
+
     // Compute the observer's barycentric position
-    eraPvppv(obs->earth_pvb, obs->obs_pvg, obs->obs_pvb);
+    if (obs->barycentric_mode) {
+        // Use user-set barycentric position directly
+        eraCpv(obs->barycentric_pv, obs->obs_pvb);
+        // Calculate obs_pvg backwards for compatibility with frames.c/satellites.c
+        eraPvmpv(obs->obs_pvb, obs->earth_pvb, obs->obs_pvg);
+    } else {
+        // Normal geocentric mode
+        eraPvppv(obs->earth_pvb, obs->obs_pvg, obs->obs_pvb);
+    }
 
 end:
     update_matrices(obs);
@@ -328,6 +371,129 @@ static json_value *observer_get_azalt(obj_t *obj, const attribute_t *attr,
     return args_value_new(TYPE_V3, v);
 }
 
+// Expose/set obs_pvg position vector to/from js.
+static json_value *observer_obs_pvg_pos_fn(obj_t *obj, const attribute_t *attr,
+                                            const json_value *args)
+{
+    observer_t *obs = (observer_t*)obj;
+    double v[3];
+    // If args provided, this is a setter
+    if (args && args->u.array.length) {
+        args_get(args, TYPE_V3, v);
+        vec3_copy(v, obs->obs_pvg[0]);
+        return NULL;
+    }
+    // Otherwise, getter
+    return args_value_new(TYPE_V3, obs->obs_pvg[0]);
+}
+
+// Expose/set obs_pvg velocity vector to/from js.
+static json_value *observer_obs_pvg_vel_fn(obj_t *obj, const attribute_t *attr,
+                                            const json_value *args)
+{
+    observer_t *obs = (observer_t*)obj;
+    double v[3];
+    // If args provided, this is a setter
+    if (args && args->u.array.length) {
+        args_get(args, TYPE_V3, v);
+        vec3_copy(v, obs->obs_pvg[1]);
+        return NULL;
+    }
+    // Otherwise, getter
+    return args_value_new(TYPE_V3, obs->obs_pvg[1]);
+}
+
+// Expose/set barycentric position vector to/from js.
+static json_value *observer_barycentric_position_fn(obj_t *obj, const attribute_t *attr,
+                                                     const json_value *args)
+{
+    observer_t *obs = (observer_t*)obj;
+    double v[3];
+    // If args provided, this is a setter
+    if (args && args->u.array.length) {
+        args_get(args, TYPE_V3, v);
+        // Check if setting to null/zero to disable barycentric mode
+        if (vec3_norm2(v) < 1e-20) {
+            obs->barycentric_mode = false;
+        } else {
+            vec3_copy(v, obs->barycentric_pv[0]);
+            obs->barycentric_mode = true;
+        }
+        return NULL;
+    }
+    // Otherwise, getter - return position or null if geocentric
+    if (obs->barycentric_mode) {
+        return args_value_new(TYPE_V3, obs->barycentric_pv[0]);
+    }
+    return json_null_new();
+}
+
+// Expose/set barycentric velocity vector to/from js.
+static json_value *observer_barycentric_velocity_fn(obj_t *obj, const attribute_t *attr,
+                                                     const json_value *args)
+{
+    observer_t *obs = (observer_t*)obj;
+    double v[3];
+    // If args provided, this is a setter
+    if (args && args->u.array.length) {
+        args_get(args, TYPE_V3, v);
+        vec3_copy(v, obs->barycentric_pv[1]);
+        obs->barycentric_mode = true;
+        return NULL;
+    }
+    // Otherwise, getter - return velocity or null if geocentric
+    if (obs->barycentric_mode) {
+        return args_value_new(TYPE_V3, obs->barycentric_pv[1]);
+    }
+    return json_null_new();
+}
+
+// C function to start animation - called from JavaScript wrapper
+EMSCRIPTEN_KEEPALIVE
+void observer_observe_from_object_ptr(observer_t *obs, obj_t *target, double duration_sec)
+{
+    double pvo[2][4];
+
+    if (!target || !obs) {
+        LOG_E("observer_observe_from_object_ptr: null pointer");
+        return;
+    }
+
+    // Get object's barycentric position/velocity
+    obj_get_pvo(target, obs, pvo);
+
+    LOG_D("observeFromObject: target pos = [%.6f, %.6f, %.6f] AU",
+          pvo[0][0], pvo[0][1], pvo[0][2]);
+    LOG_D("observeFromObject: duration = %.2f sec, clock = %.2f",
+          duration_sec, core->clock);
+
+    // Set up animation (duration is in real-world seconds)
+    obs->anim_start_clock = core->clock;
+    obs->anim_duration = duration_sec;
+
+    // Current position as start (or Earth if not in barycentric mode)
+    if (obs->barycentric_mode) {
+        eraCpv(obs->barycentric_pv, obs->anim_start_pv);
+        LOG_D("observeFromObject: starting from barycentric [%.6f, %.6f, %.6f]",
+              obs->anim_start_pv[0][0], obs->anim_start_pv[0][1], obs->anim_start_pv[0][2]);
+    } else {
+        // Start from Earth's position
+        vec3_set(obs->anim_start_pv[0], 0, 0, 0);
+        vec3_set(obs->anim_start_pv[1], 0, 0, 0);
+        LOG_D("observeFromObject: starting from Earth [0, 0, 0]");
+    }
+
+    // Target is the object's position
+    vec3_copy(pvo[0], obs->anim_target_pv[0]);
+    vec3_copy(pvo[1], obs->anim_target_pv[1]);
+
+    // Start animation
+    obs->animating = true;
+    obs->barycentric_mode = true;
+
+    LOG_D("observeFromObject: animation started!");
+}
+
 
 static obj_klass_t observer_klass = {
     .id = "observer",
@@ -350,6 +516,10 @@ static obj_klass_t observer_klass = {
                  MEMBER(observer_t, view_offset_alt)),
         PROPERTY(azalt, TYPE_V3, .fn = observer_get_azalt),
         PROPERTY(space, TYPE_BOOL, MEMBER(observer_t, space)),
+        PROPERTY(obs_pvg_pos, TYPE_V3, .fn = observer_obs_pvg_pos_fn),
+        PROPERTY(obs_pvg_vel, TYPE_V3, .fn = observer_obs_pvg_vel_fn),
+        PROPERTY(barycentricPosition, TYPE_V3, .fn = observer_barycentric_position_fn),
+        PROPERTY(barycentricVelocity, TYPE_V3, .fn = observer_barycentric_velocity_fn),
         {}
     },
 };

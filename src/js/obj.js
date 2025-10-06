@@ -28,6 +28,8 @@ Module.afterInit(function() {
     ['number', 'number', 'string']);
   var obj_get_json_data_str = Module.cwrap('obj_get_json_data_str', 'number',
     ['number']);
+  var observer_observe_from_object_ptr = Module.cwrap(
+    'observer_observe_from_object_ptr', null, ['number', 'number', 'number']);
 
   // List of {obj, attr, callback}
   var g_listeners = [];
@@ -125,6 +127,21 @@ Module.afterInit(function() {
 
   SweObj.prototype.destroy = function() {
     Module._obj_release(this.v);
+  }
+
+  // Observer-specific method: animate to object's position
+  SweObj.prototype.observeFromObject = function(targetObj, durationSec) {
+    console.log('JS: observeFromObject called', this.v, targetObj, durationSec);
+    if (!targetObj || !targetObj.v) {
+      console.error('observeFromObject: invalid target object', targetObj);
+      return;
+    }
+    if (durationSec === undefined) {
+      durationSec = 2.0; // Default 2 seconds
+    }
+    console.log('JS: calling C function with observer=' + this.v + ', target=' + targetObj.v + ', duration=' + durationSec);
+    observer_observe_from_object_ptr(this.v, targetObj.v, durationSec);
+    console.log('JS: C function returned');
   }
 
   SweObj.prototype.retain = function() {

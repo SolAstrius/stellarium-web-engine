@@ -15,9 +15,9 @@ VariantDir('build/ext_src', 'ext_src', duplicate=0)
 env = Environment(variables=vars)
 
 env.Append(CFLAGS= '-Wall -std=gnu11 -Wno-unknown-pragmas -D_GNU_SOURCE '
-                   '-Wno-missing-braces',
+                   '-Wno-missing-braces -Wno-unused-but-set-variable',
            CXXFLAGS='-Wall -std=gnu++11 -Wno-narrowing '
-                    '-Wno-unknown-pragmas -Wno-unused-function')
+                    '-Wno-unknown-pragmas -Wno-unused-function -Wno-unused-but-set-variable')
 
 if env['werror']:
     env.Append(CCFLAGS='-Werror')
@@ -49,7 +49,7 @@ env.Append(CPPPATH=['ext_src/stb'])
 
 sources += glob.glob('ext_src/zlib/*.c')
 env.Append(CPPPATH=['ext_src/zlib'])
-env.Append(CFLAGS=['-DHAVE_UNISTD_H'])
+env.Append(CFLAGS=['-DHAVE_UNISTD_H', '-Wno-deprecated-non-prototype'])
 
 sources += glob.glob('ext_src/inih/*.c')
 env.Append(CPPPATH=['ext_src/inih'])
@@ -109,13 +109,9 @@ env.Append(CCFLAGS='-DNO_LIBCURL')
 # All the emscripten runtime functions we use.
 # Needed since emscripten 1.37.
 extra_exported = [
-    'ALLOC_NORMAL',
     'GL',
     'UTF8ToString',
-    '_free',
-    '_malloc',
     'addFunction',
-    'allocate',
     'ccall',
     'cwrap',
     'getValue',
@@ -124,47 +120,54 @@ extra_exported = [
     'removeFunction',
     'setValue',
     'stringToUTF8',
-    'writeAsciiToMemory',
-    'writeArrayToMemory',
 ]
 extra_exported = ','.join("'%s'" % x for x in extra_exported)
 
-flags = [
+# Compilation flags (can be used during compilation)
+compile_flags = [
+         '-O3'
+        ]
+
+# Linker-only flags (only for linking stage)
+link_flags = [
          '-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=StelWebEngine',
          '-s', 'ALLOW_MEMORY_GROWTH=1',
          '-s', 'ALLOW_TABLE_GROWTH=1',
+         '-s', 'INITIAL_MEMORY=67108864',  # 64MB initial memory
+         '-s', 'MAXIMUM_MEMORY=268435456',  # 256MB max memory
          '--pre-js', 'src/js/pre.js',
          '--pre-js', 'src/js/obj.js',
          '--pre-js', 'src/js/geojson.js',
          '--pre-js', 'src/js/canvas.js',
          # '-s', 'STRICT=1', # Note: to put back once we switch to emsdk 2
-         '-s', 'RESERVED_FUNCTION_POINTERS=10',
          '-O3',
          '-s', 'USE_WEBGL2=1',
          '-s', 'NO_EXIT_RUNTIME=1',
-         '-s', '"EXPORTED_FUNCTIONS=[]"',
-         '-s', '"EXTRA_EXPORTED_RUNTIME_METHODS=[%s]"' % extra_exported,
-         '-s', 'FILESYSTEM=0'
+         '-s', '"EXPORTED_FUNCTIONS=[\'_malloc\',\'_free\']"',
+         '-s', '"EXPORTED_RUNTIME_METHODS=[%s]"' % extra_exported,
+         '-s', 'FILESYSTEM=0',
+         '-s', 'ASSERTIONS=1',  # Enable assertions to debug memory issues
+         '-s', 'STACK_OVERFLOW_CHECK=2',  # Check for stack overflows
+         '-s', 'FETCH=1'  # Enable Fetch API
         ]
 
 #if env['mode'] not in ['profile', 'debug']:
-#    flags += ['--closure', '1']
+#    link_flags += ['--closure', '1']
 
 if env['mode'] in ['profile', 'debug']:
-    flags += [
-        '--profiling',
-        '-s', 'ASM_JS=2', # Removes 'use asm'.
-    ]
+    compile_flags += ['--profiling']
+    link_flags += ['--profiling']
 
 if env['mode'] == 'debug':
-    flags += ['-s', 'SAFE_HEAP=1', '-s', 'ASSERTIONS=1',
-              '-s', 'WARN_UNALIGNED=1']
+    # SAFE_HEAP is deprecated, WARN_UNALIGNED removed
+    # ASSERTIONS is already in link_flags, no need to duplicate
+    link_flags += ['-s', 'ASSERTIONS=2']  # More verbose assertions in debug
 
 if env['es6']:
-    flags += ['-s', 'EXPORT_ES6=1', '-s', 'USE_ES6_IMPORT_META=0']
+    link_flags += ['-s', 'EXPORT_ES6=1', '-s', 'USE_ES6_IMPORT_META=0']
 
-env.Append(CCFLAGS=['-DNO_ARGP', '-DGLES2 1'] + flags)
-env.Append(LINKFLAGS=flags)
+env.Append(CCFLAGS=['-DNO_ARGP', '-DGLES2 1'] + compile_flags)
+env.Append(LINKFLAGS=link_flags)
 env.Append(LIBS=['GL'])
 
 prog = env.Program(target='build/stellarium-web-engine.js', source=sources)
