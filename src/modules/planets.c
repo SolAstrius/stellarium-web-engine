@@ -418,6 +418,34 @@ static void planet_get_pvo4(const planet_t *planet, const observer_t *obs,
 }
 
 /*
+ * Get true geometric position - without aberration OR light-time correction.
+ * This is the instantaneous position of the planet at time obs->tt.
+ *
+ * For NAVIGATION: Use this (where the planet IS now)
+ * For RENDERING: Use planet_get_pvo (where the planet APPEARS to be)
+ *
+ * The difference:
+ * - Rendering needs apparent position (where we SEE it due to light delay)
+ * - Navigation needs true position (where it ACTUALLY IS for trajectory planning)
+ */
+static void planet_get_pvo_geometric(const planet_t *planet, const observer_t *obs,
+                                     double pvo[2][3])
+{
+    double pvh[2][3];
+
+    // Get heliocentric position at current time (NO light-time correction)
+    planet_get_pvh(planet, obs, pvh);
+
+    // Convert to Earth-centric (barycentric via sun, then subtract earth)
+    eraPvppv(pvh, obs->sun_pvb, pvo);
+    eraPvmpv(pvo, obs->earth_pvb, pvo);
+
+    // NOTE: We do NOT call astrometric_to_apparent here!
+    // NOTE: We do NOT apply light-time correction!
+    // This gives us the TRUE geometric position for navigation.
+}
+
+/*
  * Compute the illumination from the sun taking into possible eclipses.
  */
 static double compute_sun_eclipse_factor(const planet_t *sun,
@@ -471,9 +499,16 @@ static double sun_get_vmag(const planet_t *sun, const observer_t *obs)
 {
     double eclipse_factor;
     double dist_pc; // Distance in parsec.
-    // Compute the apparent magnitude for the absolute mag (V: 4.83) and
-    // observer's distance
-    dist_pc = vec3_norm(obs->earth_pvh[0]) * (M_PI / 648000);
+    double dist_au;
+
+    // Use observer's actual distance to Sun
+    if (obs->barycentric_mode || obs->space) {
+        dist_au = vec3_norm(obs->sun_pvo[0]);
+    } else {
+        dist_au = vec3_norm(obs->earth_pvh[0]);
+    }
+    dist_pc = dist_au * (M_PI / 648000);
+
     eclipse_factor = fmax(compute_sun_eclipse_factor(sun, obs), 0.000128);
     return 4.83 + 5.0 * (log10(dist_pc) - 1.0) - 2.5 * (log10(eclipse_factor));
 }
@@ -616,6 +651,13 @@ static int planet_get_info(const obj_t *obj, const observer_t *obs, int info,
     case INFO_PVO:
         planet_get_pvo4(planet, obs, out);
         return 0;
+    case INFO_PVO_GEOMETRIC:
+        planet_get_pvo_geometric(planet, obs, pvo);
+        vec3_copy(pvo[0], ((double(*)[4])out)[0]);
+        vec3_copy(pvo[1], ((double(*)[4])out)[1]);
+        ((double(*)[4])out)[0][3] = 1;
+        ((double(*)[4])out)[1][3] = 1;
+        return 0;
     case INFO_VMAG:
         *(double*)out = planet_get_vmag(planet, obs);
         return 0;
@@ -625,6 +667,9 @@ static int planet_get_info(const obj_t *obj, const observer_t *obs, int info,
     case INFO_RADIUS:
         planet_get_pvo(planet, obs, pvo);
         *(double*)out = planet->radius_m * DM2AU / vec3_norm(pvo[0]);
+        return 0;
+    case INFO_PHYSICAL_RADIUS:
+        *(double*)out = planet->radius_m * DM2AU;
         return 0;
     case INFO_MAT:
         planet_get_mat(planet, obs, (void*)out);
@@ -1079,6 +1124,8 @@ static double get_artificial_scale(const planets_t *planets,
 
     if (planet->id != MOON) return 1;
     if (!planets->scale_moon) return 1;
+    // Disable artificial scaling when observer is in space/barycentric mode
+    if (core->observer->barycentric_mode || core->observer->space) return 1;
 
     // XXX: we should probably simplify this: just use a linear function
     // of the size in pixel.
@@ -1186,7 +1233,9 @@ static void planet_render(const planet_t *planet, const painter_t *painter_)
     double model_alpha = 0;
     painter_t painter = *painter_;
     point_3d_t point;
-    double model_k = 2.0; // How soon we switch to the 3d model.
+    // How soon we switch to the 3d model
+    // Higher value = switch earlier (show 3D model sooner)
+    double model_k = painter.obs->barycentric_mode ? 10.0 : 2.0;
     planets_t *planets = (planets_t*)planet->obj.parent;
     bool selected = core->selection && &planet->obj == core->selection;
     double cap[4];
@@ -1207,7 +1256,7 @@ static void planet_render(const planet_t *planet, const painter_t *painter_)
     // Artificially increase the moon size when we are zoomed out, so that
     // we can render it as a hips survey.
     r_scale = get_artificial_scale(planets, planet);
-    if (planet->id == MOON) model_k = 4.0;
+    if (planet->id == MOON && !painter.obs->barycentric_mode) model_k = 4.0;
 
     core_get_point_for_mag(vmag, &point_size, &point_luminance);
     point_r = core_get_apparent_angle_for_point(painter.proj, point_size * 2.0);
