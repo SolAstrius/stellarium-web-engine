@@ -625,6 +625,9 @@ static int satellite_render(obj_t *obj, const painter_t *painter_)
     const double white[4] = {1, 1, 1, 1};
     satellite_t *sat = (satellite_t*)obj;
     const bool selected = core->selection && obj == core->selection;
+
+    // Don't render Earth satellites when observer is in space
+    if (painter.obs->barycentric_mode || painter.obs->space) return 0;
     const double hints_limit_mag = painter.hints_limit_mag +
                                    g_satellites->hints_mag_offset - 2.5;
 
