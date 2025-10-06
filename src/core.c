@@ -416,10 +416,21 @@ static void core_get_point_for_mag_(
 
     // Compute apparent luminance, i.e. the luminance percieved by the eye
     // when looking in the telescope eyepiece.
-    double lum_apparent = core_mag_to_lum_apparent(mag, 0);
+
+    // Clamp magnitude to prevent tonemapper saturation for very bright/close objects
+    // This ensures stable rendering when observer is near stars
+    double mag_clamped = fmax(mag, -12.0);
+
+    double lum_apparent = core_mag_to_lum_apparent(mag_clamped, 0);
     // Apply eye adaptation.
     ld = tonemapper_map(&core->tonemapper, lum_apparent);
     if (ld < 0) ld = 0; // Prevent math error.
+
+    // For extremely bright objects (mag < -12), ensure minimum visible radius
+    if (mag < -12.0) {
+        ld = fmax(ld, 0.8);  // Guarantee high luminance for very bright objects
+    }
+
     // Compute r, using both manual adjustement factors.
     *radius = s_linear * pow(ld, s_relative / 2.0);
     if (luminance) *luminance = clamp(ld, 0, 1);

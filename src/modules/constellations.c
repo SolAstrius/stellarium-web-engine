@@ -56,6 +56,7 @@ typedef struct constellation {
     bool error; // Set if we couldn't parse the stars.
 
     double last_update; // Last update time in TT
+    uint64_t last_observer_hash; // Last observer hash for position-based updates
 
     double pvo[2][4];
     // Radius of the constellation, i.e. the one used when fitting zoom
@@ -402,9 +403,11 @@ static int constellation_update(constellation_t *con, const observer_t *obs)
     if (con->error) return -1;
 
     if (con->first_update_complete &&
-            fabs(obs->tt - con->last_update) < 365.0) {
-        // Constellation shape change cannot be seen over the course of
-        // one year
+            fabs(obs->tt - con->last_update) < 365.0 &&
+            obs->hash == con->last_observer_hash) {
+        // Constellation shape doesn't change if:
+        // - Less than 1 year has passed (proper motion negligible)
+        // - Observer position hasn't changed (no parallax shift needed)
         return 0;
     }
     if (!con->first_update_complete) {
@@ -465,6 +468,7 @@ static int constellation_update(constellation_t *con, const observer_t *obs)
     assert(con->radius > 0);
 
     con->last_update = obs->tt;
+    con->last_observer_hash = obs->hash;
     con->first_update_complete = true;
     assert(vec3_norm2(con->lines.cap) > 0);
     return 0;
