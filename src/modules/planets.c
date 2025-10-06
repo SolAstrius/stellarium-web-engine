@@ -177,7 +177,7 @@ static const double VIS_ELEMENTS[][5] = {
         /*         */   {},
         /* Mercury */   {6.74, -0.36, 3.8, -2.73, 2.00},
         /* Venus */     {16.92, -4.29, 0.09, 2.39, -.65},
-        /* Earth */     {},
+        /* Earth */     {17.6, -3.84, 0.1, 1.6, -0.3},
         /* Mars */      {9.36, -1.52, 1.60, 0., 0.},
         /* Jupiter */   {196.74, -9.25, 0.50, 0., 0.},
         /* Saturn */    {165.6, -8.88, 4.40, 0., 0.},
@@ -573,11 +573,10 @@ static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
         return sun_get_vmag(planet, obs);
     case MOON:
         return moon_get_vmag(planet, obs);
-    case EARTH:
-        return 0.0;
 
     case MERCURY:
     case VENUS:
+    case EARTH:
     case MARS:
     case JUPITER:
     case SATURN:
