@@ -77,6 +77,7 @@ int obj_info_from_str(const char *str);
     X(MAT,          mat,        PTR,    16) \
     X(PVO_GEOMETRIC, pvo_geometric, V4X2, 17) \
     X(PHYSICAL_RADIUS, physical_radius, FLOAT, 18) \
+    X(OBSERVER_DISTANCE, observer_distance, DIST, 19) \
 
 /*
  * Enum of all the info.

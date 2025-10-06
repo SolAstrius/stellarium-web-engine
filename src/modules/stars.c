@@ -268,6 +268,9 @@ static int star_get_info(const obj_t *obj, const observer_t *obs, int info,
                          void *out)
 {
     const star_t *star = (const star_t*)obj;
+    double star_pos_bary[3], observer_to_star[3];
+    double dt;
+
     switch (info) {
     case INFO_PVO:
         star_get_pvo(obj, obs, out);
@@ -277,7 +280,21 @@ static int star_get_info(const obj_t *obj, const observer_t *obs, int info,
         *(double*)out = star_get_observer_vmag(star, obs);
         return 0;
     case INFO_DISTANCE:
+        // Catalog distance from solar system barycenter (doesn't change)
         *(double*)out = star->distance;
+        return 0;
+    case INFO_OBSERVER_DISTANCE:
+        // Actual distance from observer to star (changes with observer position)
+        if (isnan(star->distance) || star->distance <= 0) {
+            // Star at infinity - return catalog distance
+            *(double*)out = star->distance;
+        } else {
+            // Calculate actual distance from observer
+            dt = obs->tt - ERFA_DJM00;
+            vec3_addk(star->pvo[0], star->pvo[1], dt, star_pos_bary);
+            vec3_sub(star_pos_bary, obs->obs_pvb[0], observer_to_star);
+            *(double*)out = vec3_norm(observer_to_star);
+        }
         return 0;
     default:
         return 1;
