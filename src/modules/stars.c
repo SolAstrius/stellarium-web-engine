@@ -181,7 +181,7 @@ static int star_init(obj_t *obj, json_value *args)
     return 0;
 }
 
-// Return the star astrometric position, that is as seen from earth center
+// Return the star astrometric position, that is as seen from observer
 // after applying proper motion and parallax.
 static void star_get_astrom(const star_t *s, const observer_t *obs,
                             double v[3])
@@ -189,8 +189,15 @@ static void star_get_astrom(const star_t *s, const observer_t *obs,
     // Apply proper motion
     double dt = obs->tt - ERFA_DJM00;
     vec3_addk(s->pvo[0], s->pvo[1], dt, v);
-    // Move to geocentric to get the astrometric position (apply parallax)
-    vec3_sub(v, obs->earth_pvb[0], v);
+
+    // Apply parallax relative to observer position only if star has
+    // meaningful parallax data. Stars without parallax (distance=NAN)
+    // have pvo as unit direction vectors and are treated as infinitely distant.
+    if (!isnan(s->distance) && s->distance > 0) {
+        // Use obs_pvb (observer barycentric position) instead of earth_pvb
+        // so stars are positioned correctly when observing from deep space
+        vec3_sub(v, obs->obs_pvb[0], v);
+    }
     vec3_normalize(v, v);
 }
 
