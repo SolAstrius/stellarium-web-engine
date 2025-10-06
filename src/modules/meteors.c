@@ -356,6 +356,8 @@ static int meteors_render(obj_t *obj, const painter_t *painter)
     meteor_t *m;
 
     if (!meteors->visible) return 0;
+    // Don't render meteors when observer is in space (atmospheric phenomenon)
+    if (painter->obs->barycentric_mode || painter->obs->space) return 0;
 
     DL_FOREACH(meteors->meteors, m) {
         meteor_render(m, painter);
