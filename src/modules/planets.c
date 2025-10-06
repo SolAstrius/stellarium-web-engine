@@ -516,7 +516,7 @@ static double sun_get_vmag(const planet_t *sun, const observer_t *obs)
 static double moon_get_vmag(const planet_t *moon, const observer_t *obs)
 {
     double el, dist;
-    double pvh[2][3], pvo[2][3], obs_to_moon[3];
+    double pvh[2][3], pvo[2][3], obs_to_moon[2][3];
 
     // This is based on the algo of pyephem.
     // XXX: move into 'algos'.
@@ -526,7 +526,7 @@ static double moon_get_vmag(const planet_t *moon, const observer_t *obs)
     // Calculate actual distance from observer to moon
     eraPvppv(pvh, obs->sun_pvb, obs_to_moon);
     eraPvmpv(obs_to_moon, obs->obs_pvb, obs_to_moon);
-    dist = vec3_norm(obs_to_moon);
+    dist = vec3_norm(obs_to_moon[0]);
 
     el = vec3_sep(pvo[0], obs->sun_pvo[0]); // Elongation.
     return -12.7 +
@@ -566,7 +566,7 @@ static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
     double i;   // Phase angle.
     double mag;
     int n;
-    double pvh[2][3], pvo[2][3], obs_to_planet[3];
+    double pvh[2][3], pvo[2][3], obs_to_planet[2][3];
 
     switch (planet->id) {
     case SUN:
@@ -594,7 +594,7 @@ static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
         // Calculate actual distance from observer to planet
         eraPvppv(pvh, obs->sun_pvb, obs_to_planet);
         eraPvmpv(obs_to_planet, obs->obs_pvb, obs_to_planet);
-        rp = vec3_norm(obs_to_planet);
+        rp = vec3_norm(obs_to_planet[0]);
 
         vis = VIS_ELEMENTS[n];
         return vis[1] + 5 * log10(rho * rp) +
@@ -610,7 +610,7 @@ static double planet_get_vmag(const planet_t *planet, const observer_t *obs)
         // Calculate actual distance from observer to planet
         eraPvppv(pvh, obs->sun_pvb, obs_to_planet);
         eraPvmpv(obs_to_planet, obs->obs_pvb, obs_to_planet);
-        rp = vec3_norm(obs_to_planet);
+        rp = vec3_norm(obs_to_planet[0]);
 
         assert(planet->albedo);
         mag = -1.0 / 0.2 * log10(sqrt(planet->albedo) *
@@ -660,7 +660,7 @@ static int planet_get_info(const obj_t *obj, const observer_t *obs, int info,
 {
     const planet_t *planet = (const planet_t*)obj;
     double pvo[2][3];
-    double pvh[2][3], obs_to_planet[3];
+    double pvh[2][3], obs_to_planet[2][3];
     double mat[4][4];
 
     switch (info) {
@@ -697,7 +697,7 @@ static int planet_get_info(const obj_t *obj, const observer_t *obs, int info,
         planet_get_pvh(planet, obs, pvh);
         eraPvppv(pvh, obs->sun_pvb, obs_to_planet);
         eraPvmpv(obs_to_planet, obs->obs_pvb, obs_to_planet);
-        *(double*)out = vec3_norm(obs_to_planet);
+        *(double*)out = vec3_norm(obs_to_planet[0]);
         return 0;
     case INFO_MAT:
         planet_get_mat(planet, obs, (void*)out);
