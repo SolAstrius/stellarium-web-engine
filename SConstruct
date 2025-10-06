@@ -133,8 +133,8 @@ link_flags = [
          '-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=StelWebEngine',
          '-s', 'ALLOW_MEMORY_GROWTH=1',
          '-s', 'ALLOW_TABLE_GROWTH=1',
-         '-s', 'INITIAL_MEMORY=67108864',  # 64MB initial memory
-         '-s', 'MAXIMUM_MEMORY=268435456',  # 256MB max memory
+         '-s', 'INITIAL_MEMORY=134217728',  # 128MB initial memory
+         '-s', 'MAXIMUM_MEMORY=536870912',  # 512MB max memory
          '--pre-js', 'src/js/pre.js',
          '--pre-js', 'src/js/obj.js',
          '--pre-js', 'src/js/geojson.js',
