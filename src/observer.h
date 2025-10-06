@@ -99,6 +99,11 @@ struct observer
     double anim_duration;        // Animation duration in seconds (real-world)
     double anim_start_pv[2][3];  // Starting barycentric position/velocity
     double anim_target_pv[2][3]; // Target barycentric position/velocity
+    double anim_last_logged_percent;  // Last logged progress percentage
+
+    // Tracking state - keeps camera pointed at an object
+    obj_t *tracking_target;      // Object to keep pointing at (or NULL)
+    bool updating_tracking;      // True when tracking system is updating orientation
 
     // Frame rotation matrices.
     // h: Horizontal (Alt/Az, left handed, X->N, Y->E, Z->up).
@@ -122,5 +127,7 @@ struct observer
 void observer_update(observer_t *obs, bool fast);
 
 bool observer_is_uptodate(const observer_t *obs, bool fast);
+
+void observer_release_tracking(observer_t *obs);
 
 #endif // OBSERVER_H
