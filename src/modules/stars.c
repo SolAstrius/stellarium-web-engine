@@ -206,7 +206,7 @@ static void star_get_astrom(const star_t *s, const observer_t *obs,
  * Calculate apparent magnitude as seen from observer's position.
  *
  * Applies inverse square law to adjust catalog magnitude based on
- * observer's distance from the star versus Earth's distance.
+ * observer's distance from the star versus the catalog reference distance.
  *
  * Parameters:
  *   s   - The star
@@ -229,11 +229,10 @@ static double star_get_observer_vmag(const star_t *s, const observer_t *obs)
     double dt = obs->tt - ERFA_DJM00;
     vec3_addk(s->pvo[0], s->pvo[1], dt, star_pos_bary);
 
-    // Distance from Earth to star (barycentric)
-    // The catalog magnitude was measured from Earth's barycentric position
-    double earth_to_star[3];
-    vec3_sub(star_pos_bary, obs->earth_pvb[0], earth_to_star);
-    double dist_earth = vec3_norm(earth_to_star);
+    // The catalog magnitude was measured from the solar system barycenter
+    // (Earth is within ~1 AU of barycenter, negligible for stellar distances).
+    // s->distance is the star's distance from barycenter at catalog epoch.
+    double dist_catalog = s->distance;
 
     // Distance from observer to star (barycentric)
     double observer_to_star[3];
@@ -246,9 +245,9 @@ static double star_get_observer_vmag(const star_t *s, const observer_t *obs)
         return -99.0;
     }
 
-    // Apply inverse square law: m_obs = m_earth + 5*log10(d_earth/d_obs)
+    // Apply inverse square law: m_obs = m_catalog + 5*log10(d_catalog/d_obs)
     // Brighter when closer (negative offset), dimmer when farther (positive offset)
-    double vmag_observer = vmag_catalog + 5.0 * log10(dist_earth / dist_observer);
+    double vmag_observer = vmag_catalog + 5.0 * log10(dist_catalog / dist_observer);
 
     return vmag_observer;
 }
