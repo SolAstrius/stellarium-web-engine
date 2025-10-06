@@ -123,6 +123,52 @@ void core_update_direction(double dt)
     }
 }
 
+// Update observer tracking - point camera at tracking target
+static void core_update_tracking(double dt)
+{
+    observer_t *obs = core->observer;
+    double target_pvo[2][3], dir[3];
+    double az, al;
+
+    if (!obs->tracking_target) return;
+
+    // Get target position in barycentric frame
+    obj_get_info(obs->tracking_target, obs, INFO_PVO_GEOMETRIC, target_pvo);
+    // Convert to barycentric
+    vec3_add(target_pvo[0], obs->earth_pvb[0], target_pvo[0]);
+
+    // Calculate direction from observer to target
+    vec3_sub(target_pvo[0], obs->obs_pvb[0], dir);
+
+    // If we're at the target (very close), don't update
+    if (vec3_norm2(dir) < 1e-20) return;
+
+    // In ecliptic/barycentric mode, convert direction to mount frame
+    // Mount frame in ecliptic mode is the ecliptic frame
+    if (core->mount_frame == FRAME_ECLIPTIC) {
+        // dir is in ICRF, need to convert to ecliptic frame
+        double dir_ecl[3];
+        mat3_mul_vec3(obs->ri2e, dir, dir_ecl);
+        vec3_to_sphe(dir_ecl, &az, &al);
+    } else {
+        // For other mount frames, convert to mount frame
+        double dir_mount[3];
+        mat3_mul_vec3(obs->ri2h, dir, dir_mount);  // ICRF -> horizontal
+        // Then apply mount rotation if needed
+        vec3_to_sphe(dir_mount, &az, &al);
+    }
+
+    // Update observer orientation (flag that tracking is updating to prevent callback from stopping tracking)
+    obs->updating_tracking = true;
+    obs->yaw = az;
+    obs->pitch = al;
+    obs->updating_tracking = false;
+
+    // Notify changes
+    module_changed(&obs->obj, "pitch");
+    module_changed(&obs->obj, "yaw");
+}
+
 // Update the observer mount quaternion.
 void core_update_mount(double dt)
 {
@@ -136,6 +182,12 @@ void core_update_mount(double dt)
         break;
     case FRAME_ICRF:
         mat3_copy(obs->rh2i, ro2m);
+        break;
+    case FRAME_ECLIPTIC:
+        // Ecliptic mount: rotations relative to ecliptic plane
+        // Need horizon→ecliptic = (horizon→ICRF) × (ICRF→ecliptic)
+        // rh2e = ri2e × rh2i
+        mat3_mul(obs->ri2e, obs->rh2i, ro2m);
         break;
     default:
         assert(false);
@@ -183,5 +235,6 @@ void core_update_observer(double dt)
     core_update_fov(dt);
     core_update_time(dt);
     core_update_direction(dt);
+    core_update_tracking(dt);  // Update tracking after direction
     core_update_mount(dt);
 }

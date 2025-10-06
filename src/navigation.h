@@ -22,3 +22,9 @@
  * Should be called at each frame.
  */
 void core_update_observer(double dt);
+
+/*
+ * Function: core_update_mount
+ * Update the observer mount matrix from mount_frame.
+ */
+void core_update_mount(double dt);
