@@ -53,6 +53,7 @@ static int on_pan(const gesture_t *gest, void *user)
     core->observer->pitch = clamp(core->observer->pitch, -M_PI / 2, +M_PI / 2);
 
     obj_set_attr(&core->obj, "lock", NULL);
+    observer_release_tracking(core->observer);  // User dragged - stop tracking
     observer_update(core->observer, true);
     // Notify the changes.
     module_changed(&core->observer->obj, "pitch");
@@ -163,6 +164,8 @@ static int movements_on_zoom(obj_t *obj, double k, double x, double y)
     core->observer->pitch += (sal - dal);
     core->observer->pitch = clamp(core->observer->pitch, -M_PI / 2, +M_PI / 2);
 
+    observer_release_tracking(core->observer);  // User zoomed - stop tracking
+
     // Notify the changes.
     module_changed(&core->observer->obj, "pitch");
     module_changed(&core->observer->obj, "yaw");
@@ -173,19 +176,34 @@ static int movements_update(obj_t *obj, double dt)
 {
     const double ZOOM_FACTOR = 1.05;
     const double MOVE_SPEED  = 1 * DD2R;
+    bool orientation_changed = false;
 
-    if (core->inputs.keys[KEY_RIGHT])
+    if (core->inputs.keys[KEY_RIGHT]) {
         core->observer->yaw += MOVE_SPEED * core->fov;
-    if (core->inputs.keys[KEY_LEFT])
+        orientation_changed = true;
+    }
+    if (core->inputs.keys[KEY_LEFT]) {
         core->observer->yaw -= MOVE_SPEED * core->fov;
-    if (core->inputs.keys[KEY_UP])
+        orientation_changed = true;
+    }
+    if (core->inputs.keys[KEY_UP]) {
         core->observer->pitch += MOVE_SPEED * core->fov;
-    if (core->inputs.keys[KEY_DOWN])
+        orientation_changed = true;
+    }
+    if (core->inputs.keys[KEY_DOWN]) {
         core->observer->pitch -= MOVE_SPEED * core->fov;
+        orientation_changed = true;
+    }
     if (core->inputs.keys[KEY_PAGE_UP])
         core->fov /= ZOOM_FACTOR;
     if (core->inputs.keys[KEY_PAGE_DOWN])
         core->fov *= ZOOM_FACTOR;
+
+    // User changed orientation with keyboard - stop tracking
+    if (orientation_changed) {
+        observer_release_tracking(core->observer);
+    }
+
     return 0;
 }
 
