@@ -50,6 +50,26 @@ static json_value *core_fn_progressbars(obj_t *obj, const attribute_t *attr,
     return ret;
 }
 
+static json_value *core_fn_mount_frame_name(obj_t *obj, const attribute_t *attr,
+                                             const json_value *args)
+{
+    core_t *core = (core_t*)obj;
+    const char *name;
+    switch (core->mount_frame) {
+        case FRAME_ASTROM: name = "FRAME_ASTROM"; break;
+        case FRAME_ICRF: name = "FRAME_ICRF"; break;
+        case FRAME_CIRS: name = "FRAME_CIRS"; break;
+        case FRAME_JNOW: name = "FRAME_JNOW"; break;
+        case FRAME_OBSERVED_GEOM: name = "FRAME_OBSERVED_GEOM"; break;
+        case FRAME_OBSERVED: name = "FRAME_OBSERVED"; break;
+        case FRAME_MOUNT: name = "FRAME_MOUNT"; break;
+        case FRAME_VIEW: name = "FRAME_VIEW"; break;
+        case FRAME_ECLIPTIC: name = "FRAME_ECLIPTIC"; break;
+        default: name = "UNKNOWN"; break;
+    }
+    return json_string_new(name);
+}
+
 EMSCRIPTEN_KEEPALIVE
 obj_t *core_get_module(const char *id)
 {
@@ -306,18 +326,27 @@ int core_update(void)
         telescope_auto(&core->telescope, core->fov);
     progressbar_update();
 
-    // Update eye adaptation.
-    if (core->fast_adaptation && core->lwmax > core->tonemapper.lwmax) {
-        lwmax = core->lwmax;
+    // Update eye adaptation
+    if (core->observer->barycentric_mode) {
+        // Space: fixed dark adaptation
+        // No dynamic adjustment - stars against black background is constant
+        lwmax = core->lwmax_min;
     } else {
-        lwmax = exp(logf(core->tonemapper.lwmax) +
-                    (logf(core->lwmax) - logf(core->tonemapper.lwmax)) *
-                    fmin(0.16 * dt / 0.01666, 0.5));
+        // Earth: gradual adaptation based on atmosphere and scene
+        if (core->fast_adaptation && core->lwmax > core->tonemapper.lwmax) {
+            lwmax = core->lwmax;
+        } else {
+            lwmax = exp(logf(core->tonemapper.lwmax) +
+                        (logf(core->lwmax) - logf(core->tonemapper.lwmax)) *
+                        fmin(0.16 * dt / 0.01666, 0.5));
+        }
     }
 
     tonemapper_update(&core->tonemapper, core->tonemapper_p, -1,
                       core->exposure_scale, lwmax);
-    core->lwmax = core->lwmax_min; // Reset for next frame.
+
+    // Reset for next frame
+    core->lwmax = core->lwmax_min;
 
     // Adjust star linear scale in function of screen pixel size
     // It ranges from 0.7 for a small screen to 1.5 for large screens
@@ -370,12 +399,21 @@ static void core_get_point_for_mag_(
         double mag, double *radius, double *luminance)
 {
     double ld;
+    double s_linear, s_relative;
 
-    // Poor man's extinction function taking the Bortle index into account
-    double s_linear = (core->star_linear_scale + 3.0 / 11.0 -
-                       core->bortle_index / 11.0) *
-                       core->star_scale_screen_factor;
-    double s_relative = core->star_relative_scale;
+    if (core->observer->barycentric_mode) {
+        // In space: no atmosphere, no extinction
+        // Use baseline scale without Bortle compensation
+        s_linear = core->star_linear_scale * core->star_scale_screen_factor;
+        s_relative = core->star_relative_scale;
+    } else {
+        // On Earth: apply atmospheric extinction based on Bortle index
+        s_linear = (core->star_linear_scale + 3.0 / 11.0 -
+                   core->bortle_index / 11.0) *
+                   core->star_scale_screen_factor;
+        s_relative = core->star_relative_scale;
+    }
+
     // Compute apparent luminance, i.e. the luminance percieved by the eye
     // when looking in the telescope eyepiece.
     double lum_apparent = core_mag_to_lum_apparent(mag, 0);
@@ -1040,6 +1078,7 @@ static obj_klass_t core_klass = {
         PROPERTY(flip_view_horizontal, TYPE_BOOL,
                  MEMBER(core_t, flip_view_horizontal)),
         PROPERTY(mount_frame, TYPE_ENUM, MEMBER(core_t, mount_frame)),
+        PROPERTY(mount_frame_name, TYPE_STRING, .fn = core_fn_mount_frame_name),
         PROPERTY(on_click, TYPE_FUNC, MEMBER(core_t, on_click)),
         PROPERTY(on_rect, TYPE_FUNC, MEMBER(core_t, on_rect)),
         PROPERTY(time_animation_target, TYPE_MJD,
