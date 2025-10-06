@@ -245,9 +245,9 @@ static double star_get_observer_vmag(const star_t *s, const observer_t *obs)
         return -99.0;
     }
 
-    // Apply inverse square law: m_obs = m_catalog + 5*log10(d_catalog/d_obs)
-    // Brighter when closer (negative offset), dimmer when farther (positive offset)
-    double vmag_observer = vmag_catalog + 5.0 * log10(dist_catalog / dist_observer);
+    // Apply inverse square law: m_obs = m_catalog + 5*log10(d_obs/d_catalog)
+    // Farther = dimmer (positive offset), Closer = brighter (negative offset)
+    double vmag_observer = vmag_catalog + 5.0 * log10(dist_observer / dist_catalog);
 
     return vmag_observer;
 }
