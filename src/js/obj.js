@@ -29,7 +29,10 @@ Module.afterInit(function() {
   var obj_get_json_data_str = Module.cwrap('obj_get_json_data_str', 'number',
     ['number']);
   var observer_observe_from_object_ptr = Module.cwrap(
-    'observer_observe_from_object_ptr', null, ['number', 'number', 'number']);
+    'observer_observe_from_object_ptr', null, ['number', 'number', 'number', 'number', 'boolean']);
+
+  var observer_release_tracking = Module.cwrap(
+    'observer_release_tracking', null, ['number']);
 
   // List of {obj, attr, callback}
   var g_listeners = [];
@@ -130,8 +133,13 @@ Module.afterInit(function() {
   }
 
   // Observer-specific method: animate to object's position
-  SweObj.prototype.observeFromObject = function(targetObj, durationSec) {
-    console.log('JS: observeFromObject called', this.v, targetObj, durationSec);
+  // Parameters:
+  //   targetObj: Object to observe from
+  //   durationSec: Animation duration (0 = instant, default 2.0)
+  //   altitudeKm: Altitude above surface in km (default 10000)
+  //   track: Keep camera pointed at object (default true)
+  SweObj.prototype.observeFromObject = function(targetObj, durationSec, altitudeKm, track) {
+    console.log('JS: observeFromObject called', this.v, targetObj, durationSec, altitudeKm, track);
     if (!targetObj || !targetObj.v) {
       console.error('observeFromObject: invalid target object', targetObj);
       return;
@@ -139,9 +147,19 @@ Module.afterInit(function() {
     if (durationSec === undefined) {
       durationSec = 2.0; // Default 2 seconds
     }
-    console.log('JS: calling C function with observer=' + this.v + ', target=' + targetObj.v + ', duration=' + durationSec);
-    observer_observe_from_object_ptr(this.v, targetObj.v, durationSec);
+    if (altitudeKm === undefined) {
+      altitudeKm = 10000.0; // Default 10,000 km
+    }
+    if (track === undefined) {
+      track = true; // Default: enable tracking
+    }
+    console.log('JS: calling C function with observer=' + this.v + ', target=' + targetObj.v + ', duration=' + durationSec + ', altitude=' + altitudeKm + ', track=' + track);
+    observer_observe_from_object_ptr(this.v, targetObj.v, durationSec, altitudeKm, track);
     console.log('JS: C function returned');
+  }
+
+  SweObj.prototype.releaseTracking = function() {
+    observer_release_tracking(this.v);
   }
 
   SweObj.prototype.retain = function() {
